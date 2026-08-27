@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-La Voz de César Vidal — RSS selectivo v2:
+La Voz de César Vidal — RSS selectivo v3:
 - Editorial
 - Despegamos
 - Así fue España
@@ -91,7 +91,28 @@ def fetch(url: str, tries: int = 5, allow_404: bool = False) -> str | None:
             time.sleep(wait)
     raise RuntimeError(f"No se pudo cargar {url}: {last}")
 
+def fix_date_year_typos(title: str) -> str:
+    """
+    Corrige erratas evidentes de año publicadas en iVoox, por ejemplo:
+    07/12/3023 -> 07/12/2023
+    06/12/3022 -> 06/12/2022
+
+    Solo actúa sobre fechas dd/mm/3xxx al final del título.
+    """
+    def repl(m):
+        d, mo, y = m.group(1), m.group(2), int(m.group(3))
+        if 3000 <= y <= 3099:
+            y -= 1000
+        return f"{d}/{mo}/{y:04d}"
+
+    return re.sub(
+        r"(\d{1,2})/(\d{1,2})/(3\d{3})(?=\s*$)",
+        repl,
+        title or ""
+    )
+
 def parse_date_from_title(title: str) -> str | None:
+    title = fix_date_year_typos(title)
     m = DATE_RE.search(title or "")
     if not m:
         return None
@@ -140,7 +161,7 @@ def extract_page(page_no: int) -> tuple[list[dict], set[str]] | None:
         best = ""
         best_section = None
         for cand in candidates:
-            cand = clean_title(cand)
+            cand = fix_date_year_typos(clean_title(cand))
             sec = classify(cand)
             if sec and len(cand) > len(best):
                 best, best_section = cand, sec
