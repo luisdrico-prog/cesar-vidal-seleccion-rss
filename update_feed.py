@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-La Voz de César Vidal — RSS selectivo v4:
+La Voz de César Vidal — RSS selectivo v5 acumulativo:
 - Editorial
 - Despegamos
 - Así fue España
@@ -296,39 +296,64 @@ def cdata(v: str) -> str:
     return "<![CDATA[" + (v or "").replace("]]>", "]]]]><![CDATA[>") + "]]>"
 
 def choose_feed_items(catalog: list[dict]) -> list[dict]:
+    """
+    Backfill ACUMULATIVO para Feedly.
+
+    - Los RECENT_KEEP más recientes permanecen siempre.
+    - Cada BACKFILL_HOLD_HOURS se añaden BACKFILL_BATCH históricos más.
+    - Los históricos ya expuestos NO se retiran.
+    - Cuando se alcanza el final, feed.xml contiene todo el catálogo.
+
+    Esto es más robusto que rotar lotes: si Feedly se salta una actualización,
+    puede recuperar esos episodios en cualquier lectura posterior.
+    """
     recent = catalog[:RECENT_KEEP]
     historical = catalog[RECENT_KEEP:]
 
     state = load_json(STATE_FILE, {})
     now = datetime.now(timezone.utc)
-    cursor = int(state.get("cursor", 0))
-    since = parse_dt(state.get("batch_since"))
 
-    if not state or now - since >= timedelta(hours=BACKFILL_HOLD_HOURS):
-        if state:
-            cursor += BACKFILL_BATCH
-        if cursor >= max(1, len(historical)):
-            cursor = 0
-        state = {
-            "cursor": cursor,
-            "batch_since": now.isoformat(),
-            "recent_keep": RECENT_KEEP,
-            "backfill_batch": BACKFILL_BATCH,
-            "historical_total": len(historical),
-        }
-        save_json(STATE_FILE, state)
+    # Migración automática desde el antiguo estado rotatorio.
+    exposed = state.get("exposed_historical")
+    if exposed is None:
+        exposed = min(BACKFILL_BATCH, len(historical))
+        last_growth = now
+    else:
+        exposed = max(0, min(int(exposed), len(historical)))
+        last_growth = parse_dt(state.get("last_growth"))
 
-    batch = historical[cursor:cursor + BACKFILL_BATCH]
-    if historical and len(batch) < BACKFILL_BATCH:
-        batch += historical[:BACKFILL_BATCH - len(batch)]
+    if exposed < len(historical):
+        if not state or now - last_growth >= timedelta(hours=BACKFILL_HOLD_HOURS):
+            exposed = min(len(historical), exposed + BACKFILL_BATCH)
+            last_growth = now
+
+    state = {
+        "mode": "cumulative",
+        "exposed_historical": exposed,
+        "last_growth": last_growth.isoformat(),
+        "recent_keep": RECENT_KEEP,
+        "backfill_batch": BACKFILL_BATCH,
+        "backfill_hold_hours": BACKFILL_HOLD_HOURS,
+        "historical_total": len(historical),
+        "total_exposed": len(recent) + exposed,
+        "complete": exposed >= len(historical),
+    }
+    save_json(STATE_FILE, state)
+
+    selected = recent + historical[:exposed]
 
     seen = set()
     result = []
-    for x in recent + batch:
+    for x in selected:
         k = str(x["id"])
         if k not in seen:
             seen.add(k)
             result.append(x)
+
+    log(
+        f"Backfill acumulativo: {len(recent)} recientes + "
+        f"{exposed}/{len(historical)} históricos = {len(result)} entradas."
+    )
     return result
 
 def build_feed(catalog: list[dict]) -> None:
