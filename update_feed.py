@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-La Voz de César Vidal — RSS selectivo:
+La Voz de César Vidal — RSS selectivo v2:
 - Editorial
 - Despegamos
 - Así fue España
@@ -75,11 +75,13 @@ def classify(title: str) -> str | None:
         return "Así fue España"
     return None
 
-def fetch(url: str, tries: int = 5) -> str:
+def fetch(url: str, tries: int = 5, allow_404: bool = False) -> str | None:
     last = None
     for attempt in range(tries):
         try:
             r = SESSION.get(url, timeout=40)
+            if allow_404 and r.status_code == 404:
+                return None
             r.raise_for_status()
             return r.text
         except Exception as exc:
@@ -107,12 +109,17 @@ def clean_title(s: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-def extract_page(page_no: int) -> list[dict]:
+def extract_page(page_no: int) -> tuple[list[dict], set[str]] | None:
     url = PAGE_TEMPLATE.format(page=page_no)
-    text = fetch(url)
-    soup = BeautifulSoup(text, "html.parser")
+    text = fetch(url, allow_404=True)
 
-    # Reunir la mejor etiqueta visible por URL/ID.
+    # En iVoox, la primera página inexistente (404) marca el final real del archivo.
+    if text is None:
+        return None
+
+    soup = BeautifulSoup(text, "html.parser")
+    all_ids = set(EPISODE_RE.findall(text))
+
     by_id: dict[str, dict] = {}
 
     for a in soup.find_all("a", href=True):
@@ -126,7 +133,6 @@ def extract_page(page_no: int) -> list[dict]:
             a.get("title", ""),
             a.get_text(" ", strip=True),
         ]
-        # Algunos títulos están en el heading padre.
         parent = a.find_parent(["h1", "h2", "h3", "h4", "article"])
         if parent:
             candidates.append(parent.get_text(" ", strip=True))
@@ -142,7 +148,6 @@ def extract_page(page_no: int) -> list[dict]:
         if not best_section:
             continue
 
-        # Canonicalizar.
         href = href.split("#", 1)[0]
         old = by_id.get(eid)
         if old is None or len(best) > len(old["title"]):
@@ -154,7 +159,7 @@ def extract_page(page_no: int) -> list[dict]:
                 "published": parse_date_from_title(best),
             }
 
-    return list(by_id.values())
+    return list(by_id.values()), all_ids
 
 def load_json(path: Path, default):
     try:
@@ -178,14 +183,15 @@ def crawl_catalog() -> list[dict]:
     consecutive_known_pages = 0
 
     for page in range(1, MAX_PAGES + 1):
-        items = extract_page(page)
+        result = extract_page(page)
 
-        # Una página sin ningún episodio seleccionado no significa necesariamente fin,
-        # porque el podcast mezcla muchas secciones. Para detectar fin real, consultamos
-        # si existen enlaces de episodios de cualquier tipo.
-        page_url = PAGE_TEMPLATE.format(page=page)
-        raw = fetch(page_url)
-        all_ids = set(EPISODE_RE.findall(raw))
+        # La primera página 404 es el final normal del histórico.
+        if result is None:
+            log(f"Fin del archivo de iVoox en página {page} (404 esperado).")
+            break
+
+        items, all_ids = result
+
         if not all_ids:
             log(f"Fin aparente del archivo en página {page}.")
             break
