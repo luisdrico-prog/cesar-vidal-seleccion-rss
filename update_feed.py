@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-La Voz de César Vidal — RSS selectivo v3:
+La Voz de César Vidal — RSS selectivo v4:
 - Editorial
 - Despegamos
 - Así fue España
@@ -196,6 +196,23 @@ def save_json(path: Path, data) -> None:
 
 def crawl_catalog() -> list[dict]:
     old = load_json(CATALOG_FILE, [])
+
+    # Limpieza retroactiva del catálogo ya existente:
+    # corrige títulos/fechas imposibles como 3023 -> 2023 aunque el
+    # rastreo incremental no vuelva a visitar esas páginas antiguas.
+    cleaned_old = []
+    for x in old:
+        if not isinstance(x, dict):
+            continue
+        item = dict(x)
+        fixed_title = fix_date_year_typos(str(item.get("title") or ""))
+        item["title"] = fixed_title
+        fixed_published = parse_date_from_title(fixed_title)
+        if fixed_published:
+            item["published"] = fixed_published
+        cleaned_old.append(item)
+
+    old = cleaned_old
     by_id = {str(x.get("id")): x for x in old if x.get("id") is not None}
     old_ids = set(by_id)
     first_run = not bool(old)
