@@ -53,6 +53,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No hay cambios"
           else
-            git commit -m "Actualizar César Vidal: Editorial, Despegamos y Así fue España"
+            git commit -m "Actualizar César Vidal: backfill acumulativo"
             git push
           fi
