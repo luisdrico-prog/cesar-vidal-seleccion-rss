@@ -1,0 +1,7 @@
+{
+  "cursor": 0,
+  "batch_since": "2026-08-27T11:07:31.915317+00:00",
+  "recent_keep": 90,
+  "backfill_batch": 120,
+  "historical_total": 3540
+}
