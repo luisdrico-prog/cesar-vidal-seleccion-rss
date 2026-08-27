@@ -39,6 +39,10 @@ jobs:
           python -m pip install --upgrade -r requirements.txt
 
       - name: Generar catálogo filtrado y RSS
+        env:
+          RECENT_KEEP: "90"
+          BACKFILL_BATCH: "250"
+          BACKFILL_HOLD_HOURS: "6"
         run: python update_feed.py
 
       - name: Guardar cambios
