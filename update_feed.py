@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-La Voz de César Vidal — RSS selectivo v5 acumulativo:
+La Voz de César Vidal — RSS selectivo v6 acumulativo robusto:
 - Editorial
 - Despegamos
 - Así fue España
@@ -221,7 +221,17 @@ def crawl_catalog() -> list[dict]:
     consecutive_known_pages = 0
 
     for page in range(1, MAX_PAGES + 1):
-        result = extract_page(page)
+        try:
+            result = extract_page(page)
+        except RuntimeError as exc:
+            # iVoox a veces devuelve 5xx de forma transitoria en una página
+            # histórica concreta. No dejamos que un fallo aislado tumbe todo
+            # el RSS ni bloquee el backfill: se registra y se continúa.
+            log(
+                f"Aviso: se omite temporalmente la página {page} por error de iVoox: {exc}"
+            )
+            time.sleep(REQUEST_DELAY)
+            continue
 
         # La primera página 404 es el final normal del histórico.
         if result is None:
@@ -248,15 +258,23 @@ def crawl_catalog() -> list[dict]:
                 by_id[k] = merged
 
         if not first_run:
-            # Si varias páginas seguidas solo contienen IDs ya conocidos,
-            # no hace falta seguir rastreando cientos de páginas cada 6 horas.
-            if all_ids and all(i in old_ids for i in all_ids):
+            # El catálogo solo guarda Editorial/Despegamos/Así fue España.
+            # Por tanto debemos comparar únicamente los IDs SELECCIONADOS de
+            # esta página, no todos los episodios de iVoox. Así la actualización
+            # diaria se detiene pronto al entrar en una zona ya catalogada.
+            selected_ids = {str(item["id"]) for item in items}
+
+            if selected_ids and all(i in old_ids for i in selected_ids):
                 consecutive_known_pages += 1
             else:
                 consecutive_known_pages = 0
 
             if consecutive_known_pages >= STOP_AFTER_KNOWN_PAGES:
-                log("Zona ya conocida alcanzada; finaliza actualización incremental.")
+                log(
+                    f"Zona ya conocida alcanzada tras "
+                    f"{consecutive_known_pages} páginas; "
+                    "finaliza actualización incremental."
+                )
                 break
 
         if page % 20 == 0 or new_here:
