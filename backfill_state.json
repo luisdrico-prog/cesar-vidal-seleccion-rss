@@ -5,7 +5,7 @@
   "recent_keep": 90,
   "backfill_batch": 250,
   "backfill_hold_hours": 6,
-  "historical_total": 3605,
+  "historical_total": 3606,
   "total_exposed": 3695,
-  "complete": true
+  "complete": false
 }
